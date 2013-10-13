@@ -32,9 +32,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="NDesk.Options">
-      <HintPath>packages\NDesk.Options.0.2.1\lib\NDesk.Options.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -46,6 +43,7 @@
   <ItemGroup>
     <Compile Include="Bootloader\Bootloader.cs" />
     <Compile Include="Bootloader\HidBootloader.cs" />
+    <Compile Include="Options.cs" />
     <Compile Include="Util\HexFile.cs" />
     <Compile Include="HID\HID.cs" />
     <Compile Include="Program.cs" />
