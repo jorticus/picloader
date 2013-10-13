@@ -6,16 +6,11 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace HIDBootloader
+namespace PicLoader
 {
-    public class BootloaderException : Exception
-    {
-        public BootloaderException() { }
-        public BootloaderException(string message) : base(message) { }
-        public BootloaderException(string message, Exception innerException) : base(message, innerException) { }
-    }
 
-    class Bootloader : IDisposable
+
+    class HidBootloader : Bootloader
     {
         public HidDevice HidDevice;
 
@@ -23,9 +18,7 @@ namespace HIDBootloader
         public DeviceFamilyType DeviceFamily { get { return deviceFamily; } }
 
         #region Constants
-        //Modify this value to match the VID and PID in your USB device descriptor.
-        //Use the formatting: "Vid_xxxx&Pid_xxxx" where xxxx is a 16-bit hexadecimal number.
-        public const string DEVICE_ID = "Vid_04d8&Pid_003c";
+
 
         
 
@@ -306,9 +299,9 @@ namespace HIDBootloader
 
         #region Constructors
 
-        public Bootloader()
+        public HidBootloader(string DeviceId)
         {
-            HidDevice = new HidDevice(DEVICE_ID);
+            HidDevice = new HidDevice(DeviceId);
 
             memoryRegions = new MemoryRegionStruct[MAX_DATA_REGIONS];
 
@@ -335,11 +328,12 @@ namespace HIDBootloader
         /// <summary>
         /// Scan for a connected USB device, throws an exception if none connected
         /// </summary>
-        public void Scan()
+        public override void Scan()
         {
             try
             {
                 HidDevice.Scan();
+                this.Query();
             }
             catch (HidDeviceException e)
             {
@@ -460,7 +454,7 @@ namespace HIDBootloader
         /// <summary>
         /// Resets the target device
         /// </summary>
-        public void Reset()
+        public override void Reset()
         {
             using (var WriteDevice = HidDevice.GetWriteFile())
             {
@@ -475,7 +469,7 @@ namespace HIDBootloader
         /// <summary>
         /// Erases the target device
         /// </summary>
-        public void Erase()
+        public override void Erase()
         {
             using (var WriteDevice = HidDevice.GetWriteFile())
             {
@@ -485,6 +479,8 @@ namespace HIDBootloader
                     Command = ERASE_DEVICE
                 });
             }
+
+            WaitForCommand();
         }
 
         /// <summary>
@@ -534,17 +530,17 @@ namespace HIDBootloader
 
         #region Programming Commands
 
-        public HexFile Read()
+        public override HexFile Read()
         {
             return null;
         }
 
-        public bool Verify(HexFile hex)
+        public override void Verify(HexFile hex)
         {
-            return true;
+            //throw new BootloaderException("Invalid byte at 0x{0:x}", 0);
         }
 
-        public void Program(HexFile hex, bool programConfigs=false)
+        public override void Program(HexFile hex, bool programConfigs = false)
         {
 			UInt32 BytesWritten = 0;
 			UInt32 BytesReceived = 0;

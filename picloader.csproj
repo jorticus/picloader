@@ -7,8 +7,8 @@
     <ProjectGuid>{BD6E9BEB-1670-4AB5-8A32-80FBFA470A64}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>HIDBootloader</RootNamespace>
-    <AssemblyName>HIDBootloader</AssemblyName>
+    <RootNamespace>PicLoader</RootNamespace>
+    <AssemblyName>picloader</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
   </PropertyGroup>
@@ -32,9 +32,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="ManyConsole">
-      <HintPath>packages\ManyConsole.0.4.2.17\lib\ManyConsole.dll</HintPath>
-    </Reference>
     <Reference Include="NDesk.Options">
       <HintPath>packages\NDesk.Options.0.2.1\lib\NDesk.Options.dll</HintPath>
     </Reference>
@@ -47,8 +44,8 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Bootloader.cs" />
-    <Compile Include="Commands\ScanCommand.cs" />
+    <Compile Include="Bootloader\Bootloader.cs" />
+    <Compile Include="Bootloader\HidBootloader.cs" />
     <Compile Include="Util\HexFile.cs" />
     <Compile Include="HID\HID.cs" />
     <Compile Include="Program.cs" />

@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace HIDBootloader
+namespace PicLoader
 {
     // Modified version of this http://buiba.blogspot.co.nz/2009/06/using-winapi-createfile-readfile.html
     public class WinApiFile : IDisposable
