@@ -30,6 +30,7 @@ namespace PicLoader
             public bool programConfigs;
             public bool noVerify;
             public bool autoReset;
+            public bool debug;
 
             public struct Hid {
                 public string deviceId;
@@ -67,6 +68,7 @@ namespace PicLoader
                     { "n|no-verify", "Don't verify on program", v => args.noVerify = (v != null)},
                     { "c|program-configs", "Program configuration bits", v => args.programConfigs = (v != null)},
                     { "r|reset", "Reset device on completion", v => args.autoReset = (v != null)},
+                    { "d|debug", "Show debug information", v => args.debug = (v != null)},
 
                     // Protocol selection
                     /*{ "auto", "Automatically scan for devices (default)", v=> {if (v!=null) args.protocol = ProtocolType.Auto;}},
