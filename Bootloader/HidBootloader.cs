@@ -329,14 +329,13 @@ namespace PicLoader
         /// <summary>
         /// Scan for a connected USB device, throws an exception if none connected
         /// </summary>
-        public override void Scan()
+        private void Scan()
         {
             try
             {
                 HidDevice.Scan();
-                this.Query();
             }
-            catch (HidDeviceException e)
+            catch (HidDeviceException)
             {
                 throw new BootloaderException("Device not connected");
             }
@@ -346,8 +345,11 @@ namespace PicLoader
         /// This function queries the attached device for the programmable memory regions
         /// and stores the information returned into the memoryRegions array.
         /// </summary>
-        private void Query()
+        public override void Query()
         {
+            // Attempt to connect to the HidDevice
+            this.Scan();
+
             if (HidDevice.DevicePath == null)
                 throw new BootloaderException("HID device not connected");
 
@@ -541,57 +543,54 @@ namespace PicLoader
             //throw new BootloaderException("Invalid byte at 0x{0:x}", 0);
         }
 
+        /// <summary>
+        /// Program the target device with the provided hexfile
+        /// </summary>
+        /// <param name="hexFile">Hexfile containing data to program</param>
+        /// <param name="programConfigs">If true, will attempt to program config words (WARNING: programming invalid config words could brick the device!)</param>
         public override void Program(HexFile hexFile, bool programConfigs = false)
         {
-			UInt32 BytesWritten = 0;
-			UInt32 BytesReceived = 0;
-
-			//unsigned char* p;
-			UInt32 address;
-			UInt64 size;
-			byte i,currentByteInAddress,currentMemoryRegion;
-			bool configsProgrammed,everythingElseProgrammed;
-			bool skipBlock,blockSkipped;
-
-			configsProgrammed = false;
-			everythingElseProgrammed = false;
-
-            
             // Program config words first to minimise the risk that the MCU
             // is reset during programming, thus leaving the MCU in a state 
             // that can't be booted.
             if (programConfigs)
             {
-                foreach (var memoryRegion in memoryRegions.Where(r => r.Type == MemoryRegionType.CONFIG))
+                var configRegions = memoryRegions.Where(r => r.Type == MemoryRegionType.CONFIG);
+
+                // Not all devices provide CONFIG memory regions, as it is usually not desirable to program them anyway.
+                if (configRegions.Count() == 0)
+                    throw new BootloaderException("Cannot program config words for this device (No CONFIG memory regions)");
+
+                foreach (var memoryRegion in configRegions)
                 {
                     ProgramMemoryRegion(hexFile, memoryRegion);
                 }
             }
 
             // Program everything else (PROGMEM, EEDATA)
-            foreach (var memoryRegion in memoryRegions.Where(r => r.Type != MemoryRegionType.CONFIG))
+            var dataRegions = memoryRegions.Where(r => r.Type != MemoryRegionType.CONFIG);
+
+            // This shouldn't happen in a properly configured device, but show in case it does to prevent confusion
+            if (dataRegions.Count() == 0)
+                throw new BootloaderException("Cannot program memory (No PROGMEM/EEDATA memory regions)");
+
+            foreach (var memoryRegion in dataRegions)
             {
                 ProgramMemoryRegion(hexFile, memoryRegion);
             }
-
-
-            /*catch (Exception e)
-            {
-                if (e is Win32Exception || e is HidDeviceException)
-                    throw new BootloaderException("Program Failed", e);
-                else
-                    throw;
-            }*/
         }
 
+        /// <summary>
+        /// Program the target PIC memory region using the provided hex file
+        /// </summary>
+        /// <param name="hexFile">Hexfile containing data to program</param>
+        /// <param name="memoryRegion">The target memory region to program</param>
         private void ProgramMemoryRegion(HexFile hexFile, MemoryRegionStruct memoryRegion)
         {
             using (var WriteFile = HidDevice.GetWriteFile())
             {
                 byte currentByteInAddress = 1;
                 bool skippedBlock = false;
-
-                //TODO: First memory region not being programmed? (addr: 0x0000)
 
                 // Obtain the data related to the current memory region
                 var regionData = hexFile.GetMemoryRegion(memoryRegion.Address, memoryRegion.Size, bytesPerAddress);
@@ -602,6 +601,7 @@ namespace PicLoader
                 uint endAddress = memoryRegion.Address + memoryRegion.Size;
                 while (address < endAddress)
                 {
+                    // Prepare command
                     ProgramDeviceStruct myCommand = new ProgramDeviceStruct
                     {
                         WindowsReserved = 0,
@@ -623,14 +623,14 @@ namespace PicLoader
 
                         if (data != 0xFF)
                         {
+                            // We can skip a block if all bytes are 0xFF.
+                            // Bytes are also ignored if it is byte 4 of a 3 word instruction on PIC24 (bytesPerAddress=2, currentByteInAddress=2, even address)
+
                             if ((bytesPerAddress != 2) || ((address%2)==0) || (currentByteInAddress!=2))
                             {
                                 // Then we can't skip this block of data
                                 skipBlock = false;
                             }
-
-                            // We can skip a block if all bytes are 0xFF.
-                            // Bytes are ignored if it is byte 4 of a 3 word instruction on PIC24 (bytesPerAddress=2, currentByteInAddress=2, even address)
                         }
 
                         if (currentByteInAddress == bytesPerAddress)
@@ -670,13 +670,8 @@ namespace PicLoader
 
                     }//end for
 
-                    
-
                     // Use the counter to determine how many bytes were written
                     myCommand.BytesPerPacket = i;
-
-                    //if (myCommand.BytesPerPacket != myCommand.Data.Length)
-                    //    throw new Exception("Packet size does not match");
 
                     //If the block was all 0xFF then we can just skip actually programming
                     //  this device.  Otherwise enter the programming sequence

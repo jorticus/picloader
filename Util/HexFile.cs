@@ -21,7 +21,7 @@ namespace PicLoader
     /// Total addressable memory is up to 4GiB using extended linear addressing.
     /// Note that the entire hex file is loaded into memory.
     /// </summary>
-    public class HexFile : IDisposable
+    public class HexFile
     {
         public string FileName { get; private set; }
         public UInt64 Size { get; private set; }
@@ -44,6 +44,11 @@ namespace PicLoader
 
         #endregion
 
+        #region Structs
+
+        /// <summary>
+        /// Represents a parsed line of the hex file
+        /// </summary>
         private struct HexLine
         {
             public byte recordLength;
@@ -58,16 +63,23 @@ namespace PicLoader
             }
         }
 
+        /// <summary>
+        /// Represents a 64KiB chunk of memory
+        /// </summary>
         public class MemoryBlock
         {
             public UInt64 startAddress = 0;
             public UInt64 size = 0;
             public byte[] data = null;
 
-            public MemoryBlock()
+            public MemoryBlock(UInt64 startAddress = 0)
             {
                 // Each memory block can be up to 65KiB in size
+                // This is because the maximum possible line address is 0xFFFF, or 65535.
+                // Extended Linear Addressing can be used to increase this, but a new block
+                // is created for each of those.
                 data = new byte[65536];
+                this.startAddress = startAddress;
             }
 
             public override string ToString()
@@ -76,28 +88,48 @@ namespace PicLoader
             }
         }
 
+        #endregion
 
+        #region Constructors
 
+        public HexFile()
+        {
+            FileName = null;
+            Size = 0;
+            blocks = null;
+        }
+
+        /// <summary>
+        /// Load the specified hex file into memory.
+        /// Note that hex files can contain up to 4GiB of data,
+        /// and this class loads all that data into RAM.
+        /// </summary>
+        /// <param name="fileName">File path to load</param>
         public HexFile(string fileName)
         {
             FileName = fileName;
-            //stream = new FileStream(fileName, FileMode.Open);
             using (var fs = new FileStream(fileName, FileMode.Open))
             {
                 LoadFromStream(fs);
             }
         }
+        /// <summary>
+        /// Load the hex file from a stream into memory.
+        /// Note that hex files can contain up to 4GiB of data,
+        /// and this class loads all that data into RAM.
+        /// </summary>
+        /// <param name="stream">The stream to read from</param>
         public HexFile(Stream stream)
         {
             FileName = null;
             LoadFromStream(stream);
         }
 
-        public void Dispose()
-        {
-            //stream.Dispose();
-        }
+        #endregion
 
+        #region Support Functions
+
+        // Validates the given hex line against the line checksum
         private bool ValidateChecksum(string line)
         {
             ulong checksumCalculated = 0;
@@ -109,6 +141,12 @@ namespace PicLoader
             checksumCalculated = (~checksumCalculated) + 1;
 
             return ((checksumCalculated & 0x000000FF) == checksum);
+        }
+
+        private byte CalculateChecksum(string line)
+        {
+            //TODO: for saving hex files
+            return 0;
         }
 
         private HexLine ParseLine(string line)
@@ -135,6 +173,10 @@ namespace PicLoader
             return hexLine;
         }
 
+        #endregion
+
+        #region Load/Save Functions
+
         private void LoadFromStream(Stream stream)
         {
             blocks = new List<MemoryBlock>();
@@ -143,6 +185,7 @@ namespace PicLoader
 			bool hexFileEOF = false;
 
             var currentBlock = new MemoryBlock();
+            UInt64 currentExtendedAddress = 0;
             Size = 0;
 
             using (var reader = new StreamReader(stream))
@@ -158,20 +201,16 @@ namespace PicLoader
                             break;
 
                         case HexRecordType.ExtendedLinearAddress:
-                            UInt64 startAddress = Convert.ToUInt64(hexLine.dataPayload, 16) << 16;
+                            currentExtendedAddress = Convert.ToUInt64(hexLine.dataPayload, 16) << 16;
 
                             // Add a new memory block section if
                             //   1: the current block has data (size > 0)
                             //   2: the next block has a different starting address to the current block
                             //   3: the next block address does not already exist in the array.
-                            if ((currentBlock.size > 0) && (startAddress != currentBlock.startAddress) && (blocks.Count(b => b.startAddress == startAddress) == 0))
+                            if ((currentBlock.size > 0) && (currentExtendedAddress != currentBlock.startAddress) && (blocks.Count(b => b.startAddress == currentExtendedAddress) == 0))
                             {
                                 blocks.Add(currentBlock);
-                                Size += currentBlock.size;
-
-                                currentBlock = new MemoryBlock();
-                                currentBlock.startAddress = startAddress;
-                                currentBlock.size = 0;
+                                currentBlock = new MemoryBlock(currentExtendedAddress);
                             }
                             break;
 
@@ -184,21 +223,47 @@ namespace PicLoader
 
                             // Assuming each memory block is 65K in size,
                             // load the data buffer with data at the given address
+                            uint offset = 0;
                             for (byte j = 0; j < hexLine.recordLength; j++ )
-                                currentBlock.data[hexLine.addressField + j] = Convert.ToByte(hexLine.dataPayload.Substring(j * 2, 2), 16);
+                            {
+                                uint addr = (uint)hexLine.addressField + j - offset;
+
+                                // Address exceeds the currently allocated data block,
+                                // create a new block at the current address
+                                if (addr >= currentBlock.data.Length) //65536
+                                {
+                                    // Limit the block size
+                                    currentBlock.size = (uint)currentBlock.data.Length;
+
+                                    // Split the memory block
+                                    blocks.Add(currentBlock);
+                                    currentBlock = new MemoryBlock(addr + currentExtendedAddress);
+
+                                    // Wrap the address around into the new block
+                                    offset = (uint)currentBlock.data.Length;
+                                    addr -= offset;
+                                }
+
+                                currentBlock.data[addr] = Convert.ToByte(hexLine.dataPayload.Substring(j * 2, 2), 16);
+                            }
 
                             // Note that if a data line is missing, the data bytes are simply left as '0'
+                            //TODO: are they supposed to be set to 0xFF?
 
                             break;
 
                         default:
-                            throw new HexFileException(String.Format("Unsupported record type 0x{0:x}", (byte)hexLine.recordType));
+                            throw new HexFileException(String.Format("Unsupported hex record type '{0}'", hexLine.recordType.ToString()));
                     }
                 }
             }
 
+            // Finally add the last block used
             blocks.Add(currentBlock);
-            Size += currentBlock.size;
+
+            Size = 0;
+            foreach (var block in blocks)
+                Size += block.size;
 
 
             /*Console.WriteLine("Num blocks: {0}", blocks.Count);
@@ -218,6 +283,18 @@ namespace PicLoader
             throw new Exception("Unimplemented");
         }
 
+        #endregion
+
+        #region Memory Access
+
+        /// <summary>
+        /// Returns all memory for the specified memory region, as a single
+        /// contiguous byte array.
+        /// </summary>
+        /// <param name="memoryAddress">Address of the memory region, in words</param>
+        /// <param name="memorySize">Size of the memory region, in words</param>
+        /// <param name="bytesPerAddress">Word size (ie. 2 for PIC24)</param>
+        /// <returns>A buffer of length (memorySize*bytesPerAddress)</returns>
         public byte[] GetMemoryRegion(uint memoryAddress, uint memorySize, uint bytesPerAddress = 1)
         {
             // HEX data is arranged like this:
@@ -235,11 +312,12 @@ namespace PicLoader
             // bytesPerAddress = 2 for the PIC24 (16-bit)
             //
 
+            if (blocks == null)
+                throw new HexFileException("Hex file not loaded");
+
             var data = new byte[memorySize*bytesPerAddress];
             uint idx = 0;
 
-            //var block = this.blocks.Select(b=>(address >= b.startAddress && true))
-            
             ulong startPicAddress = memoryAddress * bytesPerAddress;
             ulong endPicAddress = startPicAddress + (memorySize * bytesPerAddress);
 
@@ -258,36 +336,9 @@ namespace PicLoader
                 }
             }
 
-            /*var pData = new byte[memoryRegion.Size];
-
-            // pData = data for the memoryRegion
-            // totalAddress is the address in the hex file
-            // memoryRegion.address is the address of the PIC memory region
-            if((totalAddress >= (memoryRegions[i].Address * bytesPerAddress)) && (totalAddress < ((memoryRegions[i].Address + memoryRegions[i].Size) * bytesPerAddress)))
-            {
-                for(j=0;j<(recordLength);j++)
-                {
-                    unsigned long data;
-                    unsigned char *p;
-                    unsigned char *limit;
-
-                    //Record the data from the hex file into the memory allocated
-                    //  for that specific memory region.
-                    p = (unsigned char*)((totalAddress-(memoryRegions[i].Address * bytesPerAddress)) + j); 
-                    data = StringToHex(dataPayload->Substring(j*2,2));
-                    p = (unsigned char*)(pData + (totalAddress-(memoryRegions[i].Address * bytesPerAddress)) + j); 
-                    limit = (unsigned char*)(pData + ((memoryRegions[i].Size + 1)*bytesPerAddress));
-                    if(p>=limit)
-                    {
-                        break;
-                    }
-
-                    *p = (unsigned char)(data);
-                }
-                break;
-            }*/
-
             return data;
         }
+
+        #endregion
     }
 }

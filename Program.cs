@@ -63,12 +63,12 @@ namespace PicLoader
 
                 var p_main = new OptionSet() {
                     //{ "v|verbose", v => args.verbose = (v != null) },
+                    //{ "d|debug", "Show debug information", v => args.debug = (v != null)},
                     { "h|help", v => args.showhelp = (v != null) },
 
                     { "n|no-verify", "Don't verify on program", v => args.noVerify = (v != null)},
                     { "c|program-configs", "Program configuration bits", v => args.programConfigs = (v != null)},
                     { "r|reset", "Reset device on completion", v => args.autoReset = (v != null)},
-                    { "d|debug", "Show debug information", v => args.debug = (v != null)},
 
                     // Protocol selection
                     /*{ "auto", "Automatically scan for devices (default)", v=> {if (v!=null) args.protocol = ProtocolType.Auto;}},
@@ -100,7 +100,7 @@ namespace PicLoader
 
                 #region Console Help
 
-                if (args.showhelp)
+                if (args.showhelp) // --help
                 {
                     ShowHelp(p_main, p_hid);
                     return;
@@ -110,7 +110,7 @@ namespace PicLoader
 
                 #region Auto Protocol Scan
 
-                // Try and search for devices automaticall.
+                // Try and search for devices automatically.
                 // Order of search is: USB-HID, Serial, TCP, UDP
                 // USB-HID uses the default DeviceID,
                 // Serial uses common baud rates on all connected COM ports,
@@ -124,6 +124,9 @@ namespace PicLoader
 
                 #region Protocol Specific Argument Parsing
 
+                // Parse protocol specific arguments for the specified protocol.
+                // Does not apply for automatic scan, as parameters are determined automatically.
+                // Also performs some basic verification of the parameters before doing anything with them.
                 switch (args.protocol)
                 {
                     case ProtocolType.HID:
@@ -158,6 +161,9 @@ namespace PicLoader
 
                 #region Un-named Argument Parsing
 
+                // There are two un-named arguments, the first is the action to perform,
+                // the second is a filename for the hex file to use (required for program/verify/read actions)
+
                 // Must contain at least one extra parameter (action)
                 if (extra.Count < 1)
                     throw new OptionException("Must specify an action", "action");
@@ -174,11 +180,11 @@ namespace PicLoader
                 #endregion
 
 
-                // Obtain a bootloader object for the given protocol
+                // Obtain a bootloader object for the given protocol, using polymorphism
                 Bootloader bootloader = GetBootloaderObject(args);
 
-                // Detect the device
-                bootloader.Scan();
+                // Make sure the device is responding, and query it for device parameters
+                bootloader.Query();
                 Console.WriteLine("Found device");
 
                 #region Action Execution
@@ -222,7 +228,7 @@ namespace PicLoader
                             bootloader.Program(hexfile, args.programConfigs);
 
                             // Optionally verify it was programmed correctly
-                            if (args.noVerify == false)
+                            if (!args.noVerify)
                             {
                                 Console.WriteLine("Verifying");
                                 bootloader.Verify(hexfile);
@@ -261,6 +267,7 @@ namespace PicLoader
                 //Console.WriteLine("Done.");
 
             }
+#if !DEBUG
             /*catch (HidDeviceException e)
             {
                 Console.Error.WriteLine("HID Error: {0}", e.Message);
@@ -279,14 +286,21 @@ namespace PicLoader
                 Console.Error.WriteLine(e);
                 Console.Error.WriteLine();
             }
+#endif
             finally
             {
 #if DEBUG
+                // Pause the console so we can see the output
                 Console.ReadKey();
 #endif
             }
         }
         
+        /// <summary>
+        /// Obtain a bootloader object for the specified protocol
+        /// </summary>
+        /// <param name="args">Command line arguments</param>
+        /// <returns>A subclassed object of Bootloader</returns>
         static Bootloader GetBootloaderObject(Args args)
         {
             // Obtain a bootloader object for the given protocol
@@ -308,15 +322,18 @@ namespace PicLoader
             }
         }
 
+        /// <summary>
+        /// Automatically scan for devices using common settings.
+        /// The scan performs the following actions:
+        ///   1. Scan for HID devices matching common VID/PIDs
+        ///   2. Scan for Serial devices on open COM ports at common baud rates (TODO: what baud rates)
+        ///   3. Listen for special network broadcasts
+        /// Throws an exception if no devices detected.
+        /// </summary>
+        /// <returns>The protocol detected, if any.</returns>
         static ProtocolType AutoProtocolScan()
         {
             throw new NotImplementedException("Auto protocol scan not implemented yet");
-            // Scan for HID devices
-            // Scan for Serial devices (using preset common baud rates)
-            // Scan for network broadcasts
-
-            // Modify protocol to match the detected protocol if we found a device,
-            // otherwise throw an exception.
         }
 
         static void ShowHelp(OptionSet p_main, OptionSet p_hid)
@@ -357,10 +374,5 @@ namespace PicLoader
             Console.ReadKey();
             return;
         }
-
-        /*public static IEnumerable<ConsoleCommand> GetCommands()
-        {
-            return ConsoleCommandDispatcher.FindCommandsInSameAssemblyAs(typeof(Program));
-        }*/
     }
 }
