@@ -16,10 +16,8 @@ namespace PicLoader
     abstract class Bootloader
     {
         public abstract void Scan();
-        //public abstract void Query();
         public abstract void Reset();
         public abstract void Erase();
-        //public abstract void UnlockConfigBits { }
         public abstract HexFile Read();
         public abstract void Verify(HexFile hex);
         public abstract void Program(HexFile hex, bool programConfigs = false);

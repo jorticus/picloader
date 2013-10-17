@@ -199,6 +199,7 @@ namespace PicLoader
             public byte Command;
         }*/
 
+        const int PROGRAM_PACKET_DATA_SIZE = 58;
         [StructLayout(LayoutKind.Sequential, Pack = 1, Size = COMMAND_PACKET_SIZE)]
         public struct ProgramDeviceStruct
         {
@@ -207,7 +208,7 @@ namespace PicLoader
             public UInt32 Address;
             public byte BytesPerPacket;
 
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 58)]
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = PROGRAM_PACKET_DATA_SIZE)]
             public byte[] Data;
         }
 
@@ -345,7 +346,7 @@ namespace PicLoader
         /// This function queries the attached device for the programmable memory regions
         /// and stores the information returned into the memoryRegions array.
         /// </summary>
-        public void Query()
+        private void Query()
         {
             if (HidDevice.DevicePath == null)
                 throw new BootloaderException("HID device not connected");
@@ -486,7 +487,7 @@ namespace PicLoader
         /// <summary>
         /// Unlocks or Locks the target device's config bits for writing
         /// </summary>
-        public void UnlockConfigBits(bool lockBits)
+        private void UnlockConfigBits(bool lockBits)
         {
             using (var WriteDevice = HidDevice.GetWriteFile())
             {
@@ -505,7 +506,7 @@ namespace PicLoader
         /// <summary>
         /// Waits for the previous command to complete, by sending a test Query packet.
         /// </summary>
-        public void WaitForCommand()
+        private void WaitForCommand()
         {
             using (var WriteFile = HidDevice.GetWriteFile())
             {
@@ -540,7 +541,7 @@ namespace PicLoader
             //throw new BootloaderException("Invalid byte at 0x{0:x}", 0);
         }
 
-        public override void Program(HexFile hex, bool programConfigs = false)
+        public override void Program(HexFile hexFile, bool programConfigs = false)
         {
 			UInt32 BytesWritten = 0;
 			UInt32 BytesReceived = 0;
@@ -555,246 +556,24 @@ namespace PicLoader
 			configsProgrammed = false;
 			everythingElseProgrammed = false;
 
-            using (var WriteFile = HidDevice.GetWriteFile())
+            
+            // Program config words first to minimise the risk that the MCU
+            // is reset during programming, thus leaving the MCU in a state 
+            // that can't be booted.
+            if (programConfigs)
             {
-                if (programConfigs == false)
+                foreach (var memoryRegion in memoryRegions.Where(r => r.Type == MemoryRegionType.CONFIG))
                 {
-                    // we don't need to program the configuration bits
-                    // so mark that we already have programmed them
-                    configsProgrammed = true;
+                    ProgramMemoryRegion(hexFile, memoryRegion);
                 }
-
-                //While we haven't programmed everything in the device yet
-                while (!configsProgrammed || !everythingElseProgrammed)
-                {
-                    for (currentMemoryRegion = 0; currentMemoryRegion < memoryRegions.Length; currentMemoryRegion++)
-                    {
-                        //If we haven't programmed the configuration words then we want
-                        //  to do this first.  The problem is that if we have erased the
-                        //  configuration words and we receive a device reset before we
-                        //  reprogram the configuration words, then the device may not be
-                        //  capable of running on the USB any more.  To try to minimize the
-                        //  possibility of this occurrance, we first search all of the
-                        //  memory regions and look for any configuration regions and program
-                        //  these regions first.  This minimizes the time that the configuration
-                        //  words are left unprogrammed.
-
-                        //If the configuration words are not programmed yet
-                        if (!configsProgrammed)
-                        {
-                            //If the current memory region is not a configuration section
-                            //  then continue to the top of the for loop and look at the
-                            //  next memory region.  We don't want to waste time yet looking
-                            //  at the other memory regions.  We will come back later for
-                            //  the other regions.
-                            if (memoryRegions[currentMemoryRegion].Type != MemoryRegionType.CONFIG)
-                                continue;
-                        }
-                        else
-                        {
-                            //If the configuration words are already programmed then if this
-                            //  region is a configuration region then we want to continue
-                            //  back to the top of the for loop and skip over this region.
-                            //  We don't want to program the configuration regions twice.
-                            if (memoryRegions[currentMemoryRegion].Type == MemoryRegionType.CONFIG)
-                                continue;
-                        }
-
-                        //Get the address, size, and data for the current memory region
-                        address = memoryRegions[currentMemoryRegion].Address;
-                        size = memoryRegions[currentMemoryRegion].Size;
-                        //p = getMemoryRegion(currentMemoryRegion);
-
-                        //Mark that we intend to skip the first block unless we find a non-0xFF
-                        //  byte in the packet
-                        skipBlock = true;
-
-                        //Mark that we didn't skip the last block
-                        blockSkipped = false;
-
-                        //indicate that we are at the first byte of the current address
-                        currentByteInAddress = 1;
-
-                        //while the current address is less than the end address
-                        /*while (address < (memoryRegions[currentMemoryRegion].Address + memoryRegions[currentMemoryRegion].Size))
-                        {
-                            //prepare a program device command to send to the device
-                            ProgramDevice myCommand = new ProgramDevice();
-                            myCommand.WindowsReserved = 0;
-                            myCommand.Command = PROGRAM_DEVICE;
-                            myCommand.Address = address;
-
-                            //Update the progress status with a percentage of how many
-                            //  bytes are in the memory region vs how many have already been
-                            //  programmed
-                            //progressStatus = (unsigned char)(((100*(address - memoryRegions[currentMemoryRegion].Address)) / memoryRegions[currentMemoryRegion].Size));
-
-                            //for as many bytes as we can fit in a packet
-                            for(i=0; i<bytesPerPacket; i++)
-                            {
-                                byte data;
-
-                                //load up the byte from the allocated memory into the packet
-                                data = *p++;
-                                myCommand.Data[i+(sizeof(myCommand.Data)-bytesPerPacket)] = data;
-
-                                //if the byte wasn't 0xFF
-                                if (data != 0xFF)
-                                {
-                                    if (bytesPerAddress == 2)
-                                    {
-                                        if ((address%2)!=0)
-                                        {
-                                            if (currentByteInAddress == 2)
-                                            {
-                                                //We can skip this block because we don't care about this byte
-                                                //  it is byte 4 of a 3 word instruction on PIC24
-                                                //myCommand.ProgramDevice.Data[i+(sizeof(myCommand.ProgramDevice.Data)-bytesPerPacket)] = 0;
-                                            }
-                                            else
-                                            {
-                                                //Then we can't skip this block of data
-                                                skipBlock = false;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            //Then we can't skip this block of data
-                                            skipBlock = false;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        //Then we can't skip this block of data
-                                        skipBlock = false;
-                                    }
-                                }
-
-
-                                if (currentByteInAddress == bytesPerAddress)
-                                {
-                                    //If we have written enough bytes per address to be
-                                    //  at the next address, then increment the address
-                                    //  variable and reset the count.  
-                                    address++;
-                                    currentByteInAddress = 1;
-                                }
-                                else
-                                {
-                                    //If we haven't written enough bytes to fill this 
-                                    //  address then increment the number of bytes that
-                                    //  we have added for this address
-                                    currentByteInAddress++;
-                                }
-
-                                //If we have reached the end of the memory region, then we
-                                //  need to pad the data at the end of the packet instead
-                                //  of the front of the packet so we need to shift the data
-                                //  to the back of the packet.
-                                if (address >= (memoryRegions[currentMemoryRegion].Address + memoryRegions[currentMemoryRegion].Size))
-                                {
-                                    byte n;
-
-                                    i++;
-
-                                    //for each byte of the packet
-                                    for (n=0; n<sizeof(myCommand.Data); n++)
-                                    {
-                                        if (n<i)
-                                        {
-                                            //move it from where it is to the the back of the packet thus
-                                            //  shifting all of the data down
-                                            myCommand.Data[sizeof(myCommand.Data)-n-1] = myCommand.ProgramDevice.Data[i+(sizeof(myCommand.ProgramDevice.Data)-bytesPerPacket)-n-1];
-                                        }
-                                        else
-                                        {
-                                            //set the remaining data values to 0
-                                            myCommand.Data[sizeof(myCommand.Data)-n-1] = 0;
-
-                                        }
-                                    }
-
-                                    //If this was the last address then break out of the for loop
-                                    //  that is writing bytes to the packet
-                                    break;
-                                }
-                            }
-
-                            //The number of bytes programmed is still contained in the last loop
-                            //  index, i.  Copy that number into the packet that is going to the device
-                            myCommand.BytesPerPacket = i;
-
-                            //If the block was all 0xFF then we can just skip actually programming
-                            //  this device.  Otherwise enter the programming sequence
-                            if(skipBlock == false)
-                            {
-                                //If we skipped one block before this block then we may need
-                                //  to send a proramming complete command to the device before
-                                //  sending the data for this command.
-                                if(blockSkipped == true)
-                                {
-                                    WriteFile.WriteStructure<BootloaderCommand>(new BootloaderCommand {
-                                        WindowsReserved = 0,
-                                        Command = PROGRAM_COMPLETE
-                                    });
-
-                                    //since we have now indicated that the programming is complete
-                                    //  then we now mark that we haven't skipped any blocks
-                                    blockSkipped = false;
-                                }
-
-                                //#if defined(DEBUG_THREADS) && defined(DEBUG_USB)
-                                //    DEBUG_OUT(">>> USB OUT Packet >>>");
-                                //    printBuffer(myCommand.PacketData.Data,64);
-                                //#endif
-
-                                //Send the program command to the device
-                                WriteFile.WriteStructure<ProgramDevice>(myCommand);
-
-                                //initially mark that we are skipping the block.  We will
-                                //  set this back to false on the first byte we find that is 
-                                //  not 0xFF.
-                                skipBlock = true;
-                            }
-                            else
-                            {
-                                //If we are skipping this block then mark that we have skipped
-                                //  a block and initially mark that we will be skipping the
-                                //  next block.  We will set skipBlock to false if we find
-                                //  a byte that is non-0xFF in the next packet
-                                blockSkipped = true;
-                                skipBlock = true;
-                            }
-                        } //while
-
-                        //Now that we are done with all of the addresses in this memory region,
-                        //  before we move on we need to send a programming complete command to
-                        //  the device.
-                        WriteFile.WriteStructure<BootloaderCommand>(new BootloaderCommand
-                        {
-                            WindowsReserved = 0,
-                            Command = PROGRAM_COMPLETE
-                        });*/
-
-                    }//for each memory region
-
-
-                    if (configsProgrammed == false)
-                    {
-                        //If the configuration bits haven't been programmed yet then the first
-                        //  pass through the for loop that just completed will have programmed
-                        //  just the configuration bits so mark them as complete.
-                        configsProgrammed = true;
-                    }
-                    else
-                    {
-                        //If the configuration bits were already programmed then this loop must
-                        //  have programmed all of the other memory regions.  Mark everything
-                        //  else as being complete.
-                        everythingElseProgrammed = true;
-                    }
-                }//while
             }
+
+            // Program everything else (PROGMEM, EEDATA)
+            foreach (var memoryRegion in memoryRegions.Where(r => r.Type != MemoryRegionType.CONFIG))
+            {
+                ProgramMemoryRegion(hexFile, memoryRegion);
+            }
+
 
             /*catch (Exception e)
             {
@@ -803,6 +582,145 @@ namespace PicLoader
                 else
                     throw;
             }*/
+        }
+
+        private void ProgramMemoryRegion(HexFile hexFile, MemoryRegionStruct memoryRegion)
+        {
+            using (var WriteFile = HidDevice.GetWriteFile())
+            {
+                byte currentByteInAddress = 1;
+                bool skippedBlock = false;
+
+                //TODO: First memory region not being programmed? (addr: 0x0000)
+
+                // Obtain the data related to the current memory region
+                var regionData = hexFile.GetMemoryRegion(memoryRegion.Address, memoryRegion.Size, bytesPerAddress);
+                int j = 0;
+                
+                // While the current address is less than the end address
+                uint address = memoryRegion.Address;
+                uint endAddress = memoryRegion.Address + memoryRegion.Size;
+                while (address < endAddress)
+                {
+                    ProgramDeviceStruct myCommand = new ProgramDeviceStruct
+                    {
+                        WindowsReserved = 0,
+                        Command = PROGRAM_DEVICE,
+                        Address = address
+                    };
+                    myCommand.Data = new byte[PROGRAM_PACKET_DATA_SIZE];
+
+                    // If a block consists of all 0xFF, then there is no need to write the block
+                    // as the erase cycle will have set everything to 0xFF
+                    bool skipBlock = true;
+
+                    byte i;
+                    for (i = 0; i < bytesPerPacket; i++)
+                    {
+                        byte data = regionData[j++];
+
+                        myCommand.Data[i + (myCommand.Data.Length - bytesPerPacket)] = data;
+
+                        if (data != 0xFF)
+                        {
+                            if ((bytesPerAddress != 2) || ((address%2)==0) || (currentByteInAddress!=2))
+                            {
+                                // Then we can't skip this block of data
+                                skipBlock = false;
+                            }
+
+                            // We can skip a block if all bytes are 0xFF.
+                            // Bytes are ignored if it is byte 4 of a 3 word instruction on PIC24 (bytesPerAddress=2, currentByteInAddress=2, even address)
+                        }
+
+                        if (currentByteInAddress == bytesPerAddress)
+                        {
+                            // If we haven't written enough bytes per address to be at the next address
+                            address++;
+                            currentByteInAddress = 1;
+                        }
+                        else
+                        {
+                            // If we haven't written enough bytes to fill this address
+                            currentByteInAddress++;
+                        }
+
+                        //If we have reached the end of the memory region, then we
+                        //  need to pad the data at the end of the packet instead
+                        //  of the front of the packet so we need to shift the data
+                        //  to the back of the packet.
+                        if (address >= endAddress)
+                        {
+                            byte n;
+                            i++;
+
+                            int len = myCommand.Data.Length;
+                            for (n = 0; n < len; n++)
+                            {
+                                if (n < i)
+                                    // Move it from where it is to the back of the packet, thus shifting all of the data down.
+                                    myCommand.Data[len - n - 1] = myCommand.Data[i + (len - bytesPerPacket) - n - 1];
+                                else
+                                    myCommand.Data[len - n - 1] = 0x00;
+                            }
+
+                            // Break out of the for loop now that all the data has been padded out.
+                            break;
+                        }
+
+                    }//end for
+
+                    
+
+                    // Use the counter to determine how many bytes were written
+                    myCommand.BytesPerPacket = i;
+
+                    //if (myCommand.BytesPerPacket != myCommand.Data.Length)
+                    //    throw new Exception("Packet size does not match");
+
+                    //If the block was all 0xFF then we can just skip actually programming
+                    //  this device.  Otherwise enter the programming sequence
+                    if (!skipBlock)
+                    {
+						//If we skipped one block before this block then we may need
+						//  to send a proramming complete command to the device before
+						//  sending the data for this command.
+						if (skippedBlock)
+                        {
+                            SendCommandPacket<BootloaderCommandStruct>(new BootloaderCommandStruct
+                            {
+                                WindowsReserved = 0,
+                                Command = PROGRAM_COMPLETE
+                            });
+
+                            //since we have now indicated that the programming is complete
+                            //  then we now mark that we haven't skipped any blocks
+                            skippedBlock = false;
+                        }
+
+                        // Write the packet data!
+                        /*string debug = "";
+                        foreach (byte b in myCommand.Data)
+                            debug += b.ToString("x2") + " ";
+                        Console.WriteLine(">>> USB OUT Packet >>>\n{0}", debug);*/
+
+                        SendCommandPacket<ProgramDeviceStruct>(myCommand);
+                    }
+                    else
+                    {
+                        // We are skipping the block
+                        skippedBlock = true;
+                    }
+                }//end while
+
+                // All data for this region has been programmed
+                SendCommandPacket<BootloaderCommandStruct>(new BootloaderCommandStruct
+                {
+                    WindowsReserved = 0,
+                    Command = PROGRAM_COMPLETE
+                });
+
+            }//end using
         }
 
         #endregion

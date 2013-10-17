@@ -51,6 +51,11 @@ namespace PicLoader
             public HexRecordType recordType;
             public byte checksum;
             public String dataPayload;
+
+            public override string ToString()
+            {
+                return String.Format("{0}: {1}", recordType.ToString(), dataPayload);
+            }
         }
 
         public class MemoryBlock
@@ -211,6 +216,78 @@ namespace PicLoader
         private void SaveToStream(Stream stream)
         {
             throw new Exception("Unimplemented");
+        }
+
+        public byte[] GetMemoryRegion(uint memoryAddress, uint memorySize, uint bytesPerAddress = 1)
+        {
+            // HEX data is arranged like this:
+            // 0000: 00 02 04 00        
+            // 0004: 00 00 00 00
+            // 0008: 14 03 00 00
+            // 000c: dc 02 00 00
+            //
+            // PicKit2 data is arranged like this:
+            // 0000: 04 02 00           00: 00 04, 01: 02 00
+            // 0002: 00 00 00
+            // 0004: 00 03 14           04: 00 00, 05: 03 14
+            // 0006: 00 02 dc
+            //
+            // bytesPerAddress = 2 for the PIC24 (16-bit)
+            //
+
+            var data = new byte[memorySize*bytesPerAddress];
+            uint idx = 0;
+
+            //var block = this.blocks.Select(b=>(address >= b.startAddress && true))
+            
+            ulong startPicAddress = memoryAddress * bytesPerAddress;
+            ulong endPicAddress = startPicAddress + (memorySize * bytesPerAddress);
+
+            // Assumes blocks are ordered by address
+            foreach (var block in this.blocks)
+            {
+                ulong addr = block.startAddress;
+                for (uint i=0; i<block.size; i++)
+                {
+                    if (addr >= startPicAddress && addr < endPicAddress)
+                    {
+                        data[idx++] = block.data[i];
+                    }
+
+                    addr++;
+                }
+            }
+
+            /*var pData = new byte[memoryRegion.Size];
+
+            // pData = data for the memoryRegion
+            // totalAddress is the address in the hex file
+            // memoryRegion.address is the address of the PIC memory region
+            if((totalAddress >= (memoryRegions[i].Address * bytesPerAddress)) && (totalAddress < ((memoryRegions[i].Address + memoryRegions[i].Size) * bytesPerAddress)))
+            {
+                for(j=0;j<(recordLength);j++)
+                {
+                    unsigned long data;
+                    unsigned char *p;
+                    unsigned char *limit;
+
+                    //Record the data from the hex file into the memory allocated
+                    //  for that specific memory region.
+                    p = (unsigned char*)((totalAddress-(memoryRegions[i].Address * bytesPerAddress)) + j); 
+                    data = StringToHex(dataPayload->Substring(j*2,2));
+                    p = (unsigned char*)(pData + (totalAddress-(memoryRegions[i].Address * bytesPerAddress)) + j); 
+                    limit = (unsigned char*)(pData + ((memoryRegions[i].Size + 1)*bytesPerAddress));
+                    if(p>=limit)
+                    {
+                        break;
+                    }
+
+                    *p = (unsigned char)(data);
+                }
+                break;
+            }*/
+
+            return data;
         }
     }
 }
