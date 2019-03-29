@@ -40,6 +40,7 @@ namespace PicLoader
         public const int PROGRAM_COMPLETE = 0x06;
         public const int GET_DATA = 0x07;
         public const int RESET_DEVICE = 0x08;
+        public const int SIGN_FLASH = 0x09;
         public const int GET_ENCRYPTED_FF = 0xFF;
         public enum BootloaderCommand : byte { 
             QueryDevice = 0x02, 
@@ -536,6 +537,27 @@ namespace PicLoader
         public override HexFile Read()
         {
             return null;
+        }
+
+        /// <summary>
+        /// Sign Flash
+        /// The host PC application should send this command after the verify operation has completed successfully.  
+        /// If checksums are used instead of a true verify (due to ALLOW_GET_DATA_COMMAND being commented), 
+        /// then the host PC application should send SIGN_FLASH command after is has verified the checksums are as exected. 
+        /// The firmware will then program the SIGNATURE_WORD into flash at the SIGNATURE_ADDRESS.
+        /// </summary>
+        public override void SignFlash()
+        {
+            using (var WriteDevice = HidDevice.GetWriteFile())
+            {
+                WriteDevice.WriteStructure<BootloaderCommandStruct>(new BootloaderCommandStruct
+                {
+                    WindowsReserved = 0,
+                    Command = SIGN_FLASH
+                });
+            }
+
+            WaitForCommand();
         }
 
         public override void Verify(HexFile hex)
