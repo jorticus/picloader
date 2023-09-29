@@ -8,3 +8,7 @@ but re-written to be object-oriented, and wrapped in a console interface.
 
 Can be embedded in your custom C# application, 
 or can be added to the post-build events in MPLABX for automatic programming.
+
+ forked from jorticus/picloader
+ 
+ Added Sign Flash command to support the new microship firmware.

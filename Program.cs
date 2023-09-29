@@ -233,6 +233,8 @@ namespace PicLoader
                                 Console.WriteLine("Verifying");
                                 bootloader.Verify(hexfile);
                             }
+                            Console.WriteLine("Signing");
+                            bootloader.SignFlash();
                         }
                         break;
 
